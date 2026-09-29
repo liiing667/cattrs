@@ -944,3 +944,107 @@ def test_hook_factories_with_converter_methods(converter: BaseConverter):
     )
 
     assert converter.structure((2,), Test) == Test(1)
+
+
+def test_register_structure_hook_invalidates_cache(converter: BaseConverter):
+    """Registering a structure hook takes effect after a cache hit."""
+    assert converter.structure(1, int) == 1
+
+    converter.register_structure_hook(int, lambda v, _: "new")
+
+    assert converter.structure(1, int) == "new"
+
+
+def test_register_unstructure_hook_invalidates_cache(converter: BaseConverter):
+    """Registering an unstructure hook takes effect after a cache hit."""
+    assert converter.unstructure(1) == 1
+
+    converter.register_unstructure_hook(int, lambda _: "new")
+
+    assert converter.unstructure(1) == "new"
+
+
+def test_register_structure_hook_factory_invalidates_cache(converter: BaseConverter):
+    """Registering a hook factory takes effect after a cache hit."""
+    # `List[int]` is handled by a predicate hook, so a factory registered
+    # later (newer function-dispatch entries win) takes precedence.
+    assert converter.structure([1], List[int]) == [1]
+
+    converter.register_structure_hook_factory(
+        lambda t: t == List[int], lambda t: lambda v, _: "new"
+    )
+
+    assert converter.structure([1], List[int]) == "new"
+
+
+def test_register_union_structure_hook_invalidates_cache(converter: BaseConverter):
+    """Re-registering a union structure hook takes effect after a cache hit."""
+    union = Union[int, str]
+
+    converter.register_structure_hook(union, lambda v, _: ("old", v))
+    assert converter.structure(1, union) == ("old", 1)
+
+    converter.register_structure_hook(union, lambda v, _: ("new", v))
+
+    assert converter.structure(1, union) == ("new", 1)
+
+
+def test_copy_keeps_union_structure_hooks(converter: BaseConverter):
+    """Union structure hooks are kept when copying a converter."""
+    union = Union[int, str]
+
+    converter.register_structure_hook(union, lambda v, _: ("union", v))
+
+    copy = converter.copy()
+
+    assert copy.structure(1, union) == ("union", 1)
+
+
+def test_copy_starts_with_a_fresh_cache(converter: BaseConverter):
+    """A copy shares registrations with its parent, but not cached lookups."""
+    converter.structure(1, int)
+    assert converter._structure_func.dispatch.cache_info().misses > 0
+
+    copy = converter.copy()
+
+    assert copy._structure_func.dispatch.cache_info().misses == 0
+    assert copy.structure(1, int) == 1
+
+
+def test_copy_registrations_are_independent(converter: BaseConverter):
+    """Hooks registered after a copy do not leak between parent and child."""
+    copy = converter.copy()
+
+    converter.register_structure_hook(int, lambda v, _: "parent")
+    copy.register_unstructure_hook(int, lambda _: "child")
+
+    assert copy.structure(1, int) == 1
+    assert converter.unstructure(1) == 1
+
+
+def test_copy_child_class_hook_overrides_parent(converter: BaseConverter):
+    """A class hook registered on the child beats the parent's for that type."""
+    converter.register_structure_hook(int, lambda v, _: "parent")
+
+    copy = converter.copy()
+    copy.register_structure_hook(int, lambda v, _: "child")
+
+    assert copy.structure(1, int) == "child"
+    assert converter.structure(1, int) == "parent"
+
+
+def test_copy_inherited_class_hook_beats_child_factory(converter: BaseConverter):
+    """Pin the cross-strategy priority rule across copies.
+
+    Class hooks outrank hook factories, so a class hook inherited from the
+    parent wins over a factory registered on the child later; registration
+    order only matters within a strategy, not across strategies.
+    """
+    converter.register_structure_hook(int, lambda v, _: "parent-cls")
+
+    copy = converter.copy()
+    copy.register_structure_hook_factory(
+        lambda t: t is int, lambda t: lambda v, _: "child-factory"
+    )
+
+    assert copy.structure(1, int) == "parent-cls"

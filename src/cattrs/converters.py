@@ -1052,6 +1052,8 @@ class BaseConverter:
         self._unstructure_func.copy_to(res._unstructure_func, self._unstruct_copy_skip)
         self._structure_func.copy_to(res._structure_func, self._struct_copy_skip)
 
+        res._union_struct_registry.update(self._union_struct_registry)
+
         return res
 
 
@@ -1474,6 +1476,8 @@ class Converter(BaseConverter):
             res._unstructure_func, skip=self._unstruct_copy_skip
         )
         self._structure_func.copy_to(res._structure_func, skip=self._struct_copy_skip)
+
+        res._union_struct_registry.update(self._union_struct_registry)
 
         return res
 

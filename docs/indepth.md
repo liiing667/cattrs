@@ -17,6 +17,34 @@ Converters may be cloned using the {meth}`Converter.copy() <cattrs.BaseConverter
 The new copy may be changed through the `copy` arguments, but will retain all manually registered hooks from the original.
 
 
+## Hook Resolution
+
+Hook resolution happens in three stages, each usable independently of a converter:
+
+1. **Registration**, handled by {class}`HookRegistry <cattrs.dispatch.HookRegistry>`.
+   It stores the three kinds of entries: class hooks (exact, or MRO-based via
+   `singledispatch`), predicate hooks, and hook factories.
+2. **Strategy selection**, handled by {func}`select_hook <cattrs.dispatch.select_hook>`.
+   The priority order is fixed: `singledispatch` class hooks, then exact (_direct_)
+   class hooks, then predicate/factory hooks (most recently registered first), and
+   finally the converter's fallback factory.
+   Note that registration order only matters _within_ a strategy; a class hook always
+   outranks a hook factory for the same type, regardless of which was registered later.
+3. **Caching**, handled by {class}`DispatchCache <cattrs.dispatch.DispatchCache>`.
+   Selected hooks are cached per type in an unbounded LRU cache.
+
+The cache invalidation rules are:
+
+- Registering any hook (class, predicate or factory) clears the LRU cache, so the
+  new hook takes effect on the next lookup.
+- Registering a non-exact class hook or a predicate/factory hook also clears the
+  exact (_direct_) hooks, since those are merely cached products of hook factories.
+- {meth}`MultiStrategyDispatch.clear_cache <cattrs.dispatch.MultiStrategyDispatch.clear_cache>`
+  clears both the exact hooks and the LRU cache.
+- {meth}`copy() <cattrs.BaseConverter.copy>` copies all registrations (except exact
+  hooks, which are regenerated on demand) into a fresh converter with an empty cache;
+  afterwards the parent and the copy are fully independent.
+
 ## Customizing Collection Unstructuring
 
 ```{tip}
